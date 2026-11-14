@@ -3,6 +3,9 @@ hl.bind("CTRL+SUPER+ALT+Slash", hl.dsp.exec_cmd("xdg-open ~/.config/hypr/custom/
 hl.bind("ALT + SUPER_L", hl.dsp.global("quickshell:sidebarRightToggle"), { description = "Shell: Toggle right sidebar", ignore_mods = false, transparent = true })
 hl.bind("SUPER + Z", hl.dsp.global("quickshell:sidebarRightToggle"), { description = "Shell: Toggle right sidebar", ignore_mods = false, transparent = true })
 
+hl.unbind("SUPER + Space")
+hl.bind("SUPER + Space", hl.dsp.global("quickshell:appDrawerToggle"), { description = "Shell: Toggle app drawer" })
+
 hl.bind("ALT + Tab", hl.dsp.focus({ monitor = "+1" }), { description = "Window: Focus other monitor" })
 
 hl.unbind("SUPER + O")

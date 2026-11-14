@@ -30,6 +30,27 @@ Singleton {
     property bool superReleaseMightTrigger: true
     property bool wallpaperSelectorOpen: false
     property bool workspaceShowNumbers: false
+    property bool appDrawerOpen: false
+
+    onAppDrawerOpenChanged: {
+        if (GlobalStates.appDrawerOpen) {
+            GlobalStates.sidebarLeftOpen = false;
+            GlobalStates.sidebarRightOpen = false;
+            GlobalStates.overviewOpen = false;
+        }
+    }
+
+    onSidebarLeftOpenChanged: {
+        if (GlobalStates.sidebarLeftOpen) {
+            GlobalStates.appDrawerOpen = false;
+        }
+    }
+
+    onOverviewOpenChanged: {
+        if (GlobalStates.overviewOpen) {
+            GlobalStates.appDrawerOpen = false;
+        }
+    }
 
     onSidebarRightOpenChanged: {
         if (GlobalStates.sidebarRightOpen) {

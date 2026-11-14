@@ -1,4 +1,5 @@
 hl.layer_rule({ match = { namespace = "quickshell:sidebarRight" }, animation = "slide left"})
+hl.layer_rule({ match = { namespace = "quickshell:appDrawer" }, no_anim = true})
 
 -- workspaces
 hl.animation({
