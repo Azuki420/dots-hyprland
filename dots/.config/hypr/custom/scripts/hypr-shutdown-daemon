@@ -1,0 +1,23 @@
+#!/bin/bash
+# ~/.config/hypr/custom/scripts/hypr-shutdown-daemon
+
+SAVE_SCRIPT="$HOME/.config/hypr/custom/scripts/hypr-session-restore"
+
+coproc INHIBIT {
+  exec systemd-inhibit \
+    --what=shutdown \
+    --mode=delay \
+    --who="hypr-session-restore" \
+    --why="Save Hyprland session before shutdown" \
+    gdbus monitor --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1
+}
+
+while read -r line <&"${INHIBIT[0]}"; do
+  case "$line" in
+    *PrepareForShutdown*true*)
+      "$SAVE_SCRIPT" save
+      kill "$INHIBIT_PID" 2>/dev/null
+      break
+      ;;
+  esac
+done

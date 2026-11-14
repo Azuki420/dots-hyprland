@@ -27,7 +27,8 @@ Scope {
 
         anchors {
             top: true
-            right: true
+            //right: true
+            left: true
             bottom: true
         }
 

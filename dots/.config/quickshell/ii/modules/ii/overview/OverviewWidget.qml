@@ -44,8 +44,47 @@ Item {
     property int windowDraggingZ: 99999
     property real workspaceSpacing: 5
 
+    property string draggingAddress: ""
     property int draggingFromWorkspace: -1
     property int draggingTargetWorkspace: -1
+    property string targetWindowAddress: ""
+    property int targetWindowWorkspace: -1
+    property string targetDropDirection: ""
+
+    function calculateDropDirection(relX, relY) {
+        if (relX >= 0.32 && relX <= 0.68 && relY >= 0.32 && relY <= 0.68) {
+            return "swap";
+        }
+        const dLeft = relX;
+        const dRight = 1 - relX;
+        const dTop = relY;
+        const dBottom = 1 - relY;
+        const minD = Math.min(dLeft, dRight, dTop, dBottom);
+        if (minD === dLeft) return "l";
+        if (minD === dRight) return "r";
+        if (minD === dTop) return "u";
+        return "d";
+    }
+
+    function getTiledCountInWorkspace(wsId) {
+        if (!wsId || wsId <= 0) return 0;
+        const list = root.windows;
+        if (!list) return 0;
+        return list.filter(w => w && w.workspace && Number(w.workspace.id) === Number(wsId) && !w.floating).length;
+    }
+
+    function getSingleTiledWindowInWorkspace(wsId, excludeAddr) {
+        if (!wsId || wsId <= 0) return null;
+        const list = root.windows;
+        if (!list) return null;
+        const cleanExclude = excludeAddr ? (excludeAddr.startsWith("0x") ? excludeAddr : `0x${excludeAddr.replace(/^address:/, '')}`) : "";
+        return list.find(w => {
+            if (!w || !w.workspace || Number(w.workspace.id) !== Number(wsId) || w.floating) return false;
+            const wAddr = w.address.startsWith("0x") ? w.address : `0x${w.address.replace(/^address:/, '')}`;
+            if (cleanExclude && wAddr.toLowerCase() === cleanExclude.toLowerCase()) return false;
+            return true;
+        });
+    }
 
     implicitWidth: overviewBackground.implicitWidth + Appearance.sizes.elevationMargin * 2
     implicitHeight: overviewBackground.implicitHeight + Appearance.sizes.elevationMargin * 2
@@ -106,10 +145,21 @@ Item {
                             property color defaultWorkspaceColor: Appearance.colors.colSurfaceContainerLow
                             property color hoveredWorkspaceColor: ColorUtils.mix(defaultWorkspaceColor, Appearance.colors.colLayer1Hover, 0.1)
                             property color hoveredBorderColor: Appearance.colors.colLayer2Hover
-                            property bool hoveredWhileDragging: false
+                            property int wsTiledCount: root.getTiledCountInWorkspace(workspace.workspaceValue)
+                            property bool hoveredWhileDragging: {
+                                if (root.draggingAddress === "") return false;
+                                if (Number(root.draggingFromWorkspace) === Number(workspace.workspaceValue)) return false;
+                                // Only show workspace-level indicator when workspace has 0 tiles (empty workspace)!
+                                if (wsTiledCount > 0) return false;
+                                if (Number(root.targetWindowWorkspace) === Number(workspace.workspaceValue)) return true;
+                                if (Number(root.draggingTargetWorkspace) === Number(workspace.workspaceValue)) return true;
+                                return false;
+                            }
 
                             implicitWidth: root.workspaceImplicitWidth
                             implicitHeight: root.workspaceImplicitHeight
+                            width: root.workspaceImplicitWidth
+                            height: root.workspaceImplicitHeight
                             color: hoveredWhileDragging ? hoveredWorkspaceColor : defaultWorkspaceColor
                             property bool workspaceAtLeft: colIndex === 0
                             property bool workspaceAtRight: colIndex === Config.options.overview.columns - 1
@@ -149,14 +199,49 @@ Item {
 
                             DropArea {
                                 anchors.fill: parent
-                                onEntered: {
+                                onEntered: (drag) => {
                                     root.draggingTargetWorkspace = workspace.workspaceValue
-                                    if (root.draggingFromWorkspace == root.draggingTargetWorkspace) return;
-                                    hoveredWhileDragging = true
+                                    if (wsTiledCount === 1) {
+                                        const singleWin = root.getSingleTiledWindowInWorkspace(workspace.workspaceValue, root.draggingAddress)
+                                        if (singleWin) {
+                                            const addr = singleWin.address.startsWith("0x") ? singleWin.address : `0x${singleWin.address}`
+                                            root.targetWindowAddress = addr
+                                            root.targetWindowWorkspace = workspace.workspaceValue
+                                            if (drag && typeof drag.x === 'number' && width > 0) {
+                                                const relX = drag.x / width
+                                                root.targetDropDirection = (relX < 0.5) ? "l" : "r"
+                                            } else {
+                                                root.targetDropDirection = ""
+                                            }
+                                        }
+                                    } else {
+                                        root.targetDropDirection = ""
+                                    }
+                                }
+                                onPositionChanged: (drag) => {
+                                    root.draggingTargetWorkspace = workspace.workspaceValue
+                                    if (wsTiledCount === 1 && root.targetWindowAddress === "") {
+                                        const singleWin = root.getSingleTiledWindowInWorkspace(workspace.workspaceValue, root.draggingAddress)
+                                        if (singleWin) {
+                                            const addr = singleWin.address.startsWith("0x") ? singleWin.address : `0x${singleWin.address}`
+                                            root.targetWindowAddress = addr
+                                            root.targetWindowWorkspace = workspace.workspaceValue
+                                        }
+                                    }
+                                    if (drag && typeof drag.x === 'number' && width > 0) {
+                                        const relX = drag.x / width
+                                        root.targetDropDirection = (relX < 0.5) ? "l" : "r"
+                                    }
                                 }
                                 onExited: {
-                                    hoveredWhileDragging = false
-                                    if (root.draggingTargetWorkspace == workspace.workspaceValue) root.draggingTargetWorkspace = -1
+                                    if (root.draggingTargetWorkspace == workspace.workspaceValue) {
+                                        root.draggingTargetWorkspace = -1
+                                    }
+                                    if (root.targetWindowWorkspace == workspace.workspaceValue) {
+                                        root.targetWindowAddress = ""
+                                        root.targetWindowWorkspace = -1
+                                    }
+                                    root.targetDropDirection = ""
                                 }
                             }
 
@@ -175,7 +260,6 @@ Item {
             Repeater { // Window repeater
                 model: ScriptModel {
                     values: {
-                        // console.log(JSON.stringify(ToplevelManager.toplevels.values.map(t => t), null, 2))
                         return ToplevelManager.toplevels.values.filter((toplevel) => {
                             const address = `0x${toplevel.HyprlandToplevel?.address}`
                             var win = windowByAddress[address]
@@ -196,6 +280,40 @@ Item {
                     widgetMonitor: HyprlandData.monitors.find(m => m.id == root.monitor.id)
                     windowData: windowByAddress[address]
 
+                    targetDropDirection: (root.targetWindowAddress === window.address) ? root.targetDropDirection : ""
+                    isResizeActive: dragArea.isResizing
+                    splitDelta: dragArea.currentSplitDelta
+
+                    onStartCornerResize: (mouseX, mouseY) => {
+                        dragArea.isResizing = true
+                        dragArea.resizeStartX = mouseX
+                        dragArea.resizeStartY = mouseY
+                        dragArea.resizeStartWidth = window.width
+                        dragArea.resizeStartHeight = window.height
+                        dragArea.currentSplitDelta = 0
+                        dragArea.currentWidthDelta = 0
+                        dragArea.currentHeightDelta = 0
+                    }
+
+                    onUpdateCornerResize: (mouseX, mouseY) => {
+                        if (dragArea.isResizing) {
+                            const dx = mouseX - dragArea.resizeStartX
+                            const dy = mouseY - dragArea.resizeStartY
+                            if (windowData?.floating) {
+                                dragArea.currentWidthDelta = dx
+                                dragArea.currentHeightDelta = dy
+                                window.width = Math.max(80, dragArea.resizeStartWidth + dx)
+                                window.height = Math.max(60, dragArea.resizeStartHeight + dy)
+                            } else {
+                                dragArea.currentSplitDelta = dx / (root.workspaceImplicitWidth * 0.4)
+                            }
+                        }
+                    }
+
+                    onEndCornerResize: (mouse) => {
+                        dragArea.finishResize()
+                    }
+
                     property bool atInitPosition: (initX == x && initY == y)
 
                     // Offset on the canvas
@@ -203,8 +321,8 @@ Item {
                     property int workspaceRowIndex: getWsRow(windowData?.workspace.id)
                     xOffset: (root.workspaceImplicitWidth + workspaceSpacing) * workspaceColIndex
                     yOffset: (root.workspaceImplicitHeight + workspaceSpacing) * workspaceRowIndex
-                    property real xWithinWorkspaceWidget: Math.max((windowData?.at[0] - (monitor?.x ?? 0) - monitorData?.reserved[0]) * root.scale, 0)
-                    property real yWithinWorkspaceWidget: Math.max((windowData?.at[1] - (monitor?.y ?? 0) - monitorData?.reserved[1]) * root.scale, 0)
+                    property real xWithinWorkspaceWidget: Math.max((windowData?.at[0] - (monitor?.x ?? 0) - (monitorData?.reserved?.[0] ?? 0)) * window.widthRatio * root.scale, 0)
+                    property real yWithinWorkspaceWidget: Math.max((windowData?.at[1] - (monitor?.y ?? 0) - (monitorData?.reserved?.[1] ?? 0)) * window.heightRatio * root.scale, 0)
 
                     // Radius
                     property real minRadius: Appearance.rounding.small
@@ -243,44 +361,271 @@ Item {
                     z: Drag.active ? root.windowDraggingZ : (root.windowZ + windowData?.floating + windowData?.fullscreen * 2)
                     Drag.hotSpot.x: width / 2
                     Drag.hotSpot.y: height / 2
+
+                    DropArea {
+                        id: tileDropArea
+                        anchors.fill: parent
+                        enabled: root.draggingAddress !== "" && root.draggingAddress !== window.address
+
+                        function updateDropDirection(drag) {
+                            if (!drag || typeof drag.x !== 'number' || width <= 0) {
+                                root.targetDropDirection = ""
+                                return
+                            }
+                            const targetWsId = windowData?.workspace?.id ?? -1
+                            const sameWorkspace = (Number(root.draggingFromWorkspace) === Number(targetWsId))
+                            const wsTiledCount = root.getTiledCountInWorkspace(targetWsId)
+                            const isTargetFloating = windowData?.floating ?? false
+                            const draggedWin = root.windowByAddress[root.draggingAddress]
+                            const isDraggedFloating = draggedWin?.floating ?? false
+
+                            if (sameWorkspace && wsTiledCount === 2 && !isTargetFloating && !isDraggedFloating) {
+                                // Exactly 2 tiles on this workspace: ONLY allow swapping left/right, never split!
+                                root.targetDropDirection = "swap"
+                            } else if (height > width) {
+                                // Taller than wide (like a vertical column): splits vertically into Top ("u") or Bottom ("d")!
+                                const relY = drag.y / height
+                                root.targetDropDirection = (relY < 0.5) ? "u" : "d"
+                            } else {
+                                // Wider than tall (like 1-tile workspace, or stacked right tiles): splits horizontally into Left ("l") or Right ("r")!
+                                const relX = drag.x / width
+                                root.targetDropDirection = (relX < 0.5) ? "l" : "r"
+                            }
+                        }
+
+                        onEntered: (drag) => {
+                            root.targetWindowAddress = window.address
+                            const targetWsId = windowData?.workspace?.id ?? -1
+                            root.targetWindowWorkspace = targetWsId
+                            updateDropDirection(drag)
+                        }
+
+                        onPositionChanged: (drag) => {
+                            root.targetWindowAddress = window.address
+                            const targetWsId = windowData?.workspace?.id ?? -1
+                            root.targetWindowWorkspace = targetWsId
+                            updateDropDirection(drag)
+                        }
+                        onExited: {
+                            if (root.targetWindowAddress === window.address) {
+                                root.targetWindowAddress = ""
+                                root.targetDropDirection = ""
+                            }
+                        }
+                    }
+
                     MouseArea {
                         id: dragArea
                         anchors.fill: parent
                         hoverEnabled: true
-                        onEntered: hovered = true // For hover color change
-                        onExited: hovered = false // For hover color change
-                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                        onEntered: hovered = true
+                        onExited: hovered = false
+                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                         drag.target: parent
-                        onPressed: (mouse) => {
-                            root.draggingFromWorkspace = windowData?.workspace.id
-                            window.pressed = true
-                            window.Drag.active = true
-                            window.Drag.source = window
-                            window.Drag.hotSpot.x = mouse.x
-                            window.Drag.hotSpot.y = mouse.y
-                            // console.log(`[OverviewWindow] Dragging window ${windowData?.address} from position (${window.x}, ${window.y})`)
+
+                        property bool isResizing: false
+                        property real resizeStartX: 0
+                        property real resizeStartY: 0
+                        property real resizeStartWidth: 0
+                        property real resizeStartHeight: 0
+                        property real currentSplitDelta: 0
+                        property real currentWidthDelta: 0
+                        property real currentHeightDelta: 0
+
+                        property bool wasDragged: false
+                        property real pressX: 0
+                        property real pressY: 0
+
+                        function getScreenCoords(mx, my) {
+                            const globalPt = dragArea.mapToItem(null, mx, my)
+                            const screenX = Math.round((root.monitorData?.x ?? 0) + globalPt.x)
+                            const screenY = Math.round((root.monitorData?.y ?? 0) + globalPt.y)
+                            return { x: screenX, y: screenY }
                         }
-                        onReleased: {
-                            const targetWorkspace = root.draggingTargetWorkspace
-                            window.pressed = false
-                            window.Drag.active = false
-                            root.draggingFromWorkspace = -1
-                            if (targetWorkspace !== -1 && targetWorkspace !== windowData?.workspace.id) {
-                                Hyprland.dispatch(`hl.dsp.window.move({ workspace = ${targetWorkspace}, follow = false, window = "address:${window.windowData?.address}" })`)
+
+                        function finishResize(mouse) {
+                            if (!isResizing) return;
+                            isResizing = false
+                            const coords = mouse ? getScreenCoords(mouse.x, mouse.y) : getScreenCoords(dragArea.width, dragArea.height)
+                            if (windowData?.floating) {
+                                if (Math.abs(currentWidthDelta) > 5 || Math.abs(currentHeightDelta) > 5) {
+                                    const exactPixelW = Math.max(100, Math.round(window.width / (root.scale * window.widthRatio)))
+                                    const exactPixelH = Math.max(100, Math.round(window.height / (root.scale * window.heightRatio)))
+                                    Hyprland.dispatch(`hl.dsp.window.resize({ size = "${exactPixelW} ${exactPixelH}", exact = true, window = "address:${window.windowData?.address}" })`)
+                                    Hyprland.dispatch(`hl.dsp.cursor.move({ x = ${coords.x}, y = ${coords.y} })`)
+                                }
+                                updateWindowPosition.restart()
+                            } else {
+                                if (Math.abs(currentSplitDelta) >= 0.03) {
+                                    const deltaStr = (currentSplitDelta >= 0 ? "+" : "") + currentSplitDelta.toFixed(2)
+                                    Hyprland.dispatch(`hl.dsp.focus({ window = "address:${window.windowData?.address}" })`)
+                                    Hyprland.dispatch(`hl.dsp.layout("splitratio ${deltaStr}")`)
+                                    Hyprland.dispatch(`hl.dsp.cursor.move({ x = ${coords.x}, y = ${coords.y} })`)
+                                    HyprlandData.updateAll()
+                                }
+                                currentSplitDelta = 0
                                 updateWindowPosition.restart()
                             }
-                            else {
-                                if (!window.windowData.floating) {
+                        }
+
+                        onWheel: (wheel) => {
+                            if (wheel.angleDelta.y !== 0) {
+                                if (!windowData?.floating) {
+                                    const coords = getScreenCoords(wheel.x, wheel.y)
+                                    const delta = wheel.angleDelta.y > 0 ? "+0.05" : "-0.05"
+                                    Hyprland.dispatch(`hl.dsp.focus({ window = "address:${windowData?.address}" })`)
+                                    Hyprland.dispatch(`hl.dsp.layout("splitratio ${delta}")`)
+                                    Hyprland.dispatch(`hl.dsp.cursor.move({ x = ${coords.x}, y = ${coords.y} })`)
+                                    HyprlandData.updateAll()
                                     updateWindowPosition.restart()
-                                    return
+                                    wheel.accepted = true
                                 }
-                                const percentageX = (window.x - xOffset) / root.workspaceImplicitWidth
-                                const percentageY = (window.y - yOffset) / root.workspaceImplicitHeight
-                                Hyprland.dispatch(`hl.dsp.window.move({ x = "${percentageX * root.screen.width}", y = "${percentageY * root.screen.height}", window = "address:${window.windowData?.address}" })`)
                             }
                         }
+
+                        onPressed: (mouse) => {
+                            wasDragged = false
+                            pressX = mouse.x
+                            pressY = mouse.y
+
+                            if (mouse.button === Qt.RightButton) {
+                                drag.target = null
+                                isResizing = true
+                                resizeStartX = mouse.x
+                                resizeStartY = mouse.y
+                                resizeStartWidth = window.width
+                                resizeStartHeight = window.height
+                                currentSplitDelta = 0
+                                currentWidthDelta = 0
+                                currentHeightDelta = 0
+                            } else if (mouse.button === Qt.LeftButton) {
+                                drag.target = parent
+                                isResizing = false
+                                root.targetWindowAddress = ""
+                                root.targetWindowWorkspace = -1
+                                root.targetDropDirection = ""
+                                root.draggingAddress = window.address
+                                root.draggingFromWorkspace = windowData?.workspace.id
+                                window.pressed = true
+                                window.Drag.active = true
+                                window.Drag.source = window
+                                window.Drag.hotSpot.x = mouse.x
+                                window.Drag.hotSpot.y = mouse.y
+                            }
+                        }
+
+                        onPositionChanged: (mouse) => {
+                            if (!isResizing && (Math.abs(mouse.x - pressX) > 6 || Math.abs(mouse.y - pressY) > 6)) {
+                                wasDragged = true
+                            }
+
+                            if (isResizing) {
+                                const dx = mouse.x - resizeStartX
+                                const dy = mouse.y - resizeStartY
+                                if (windowData?.floating) {
+                                    currentWidthDelta = dx
+                                    currentHeightDelta = dy
+                                    window.width = Math.max(80, resizeStartWidth + dx)
+                                    window.height = Math.max(60, resizeStartHeight + dy)
+                                } else {
+                                    currentSplitDelta = dx / (root.workspaceImplicitWidth * 0.4)
+                                }
+                            }
+                        }
+
+                        onReleased: (mouse) => {
+                            if (isResizing) {
+                                finishResize(mouse)
+                                return
+                            }
+
+                            if (mouse.button === Qt.LeftButton) {
+                                const coords = getScreenCoords(mouse.x, mouse.y)
+                                const targetWs = (root.targetWindowWorkspace !== -1 && root.targetWindowAddress !== "") ? root.targetWindowWorkspace : root.draggingTargetWorkspace
+                                const targetWinAddr = root.targetWindowAddress
+                                const dropDir = root.targetDropDirection
+                                
+                                window.pressed = false
+                                window.Drag.active = false
+                                const draggedAddr = window.windowData?.address
+                                const fromWs = root.draggingFromWorkspace
+
+                                root.draggingAddress = ""
+                                root.draggingFromWorkspace = -1
+                                root.draggingTargetWorkspace = -1
+                                root.targetWindowAddress = ""
+                                root.targetWindowWorkspace = -1
+                                root.targetDropDirection = ""
+
+                                if (targetWinAddr !== "" && targetWinAddr !== window.address) {
+                                    // Dropped on a specific target window!
+                                    const targetAddrClean = targetWinAddr.startsWith("address:") ? targetWinAddr : `address:${targetWinAddr}`
+                                    const draggedAddrClean = draggedAddr.startsWith("address:") ? draggedAddr : `address:${draggedAddr}`
+
+                                    if (dropDir === "swap") {
+                                        if (fromWs !== targetWs) {
+                                            Hyprland.dispatch(`hl.dsp.window.move({ workspace = ${targetWs}, follow = false, window = "${draggedAddrClean}" })`)
+                                        }
+                                        Hyprland.dispatch(`hl.dsp.focus({ window = "${draggedAddrClean}" })`)
+                                        Hyprland.dispatch(`hl.dsp.window.swap({ target = "${targetAddrClean}" })`)
+                                    } else {
+                                        if (fromWs !== targetWs) {
+                                            // Focus target window first so dwindle splits that specific window!
+                                            Hyprland.dispatch(`hl.dsp.focus({ window = "${targetAddrClean}" })`)
+                                            Hyprland.dispatch(`hl.dsp.window.move({ workspace = ${targetWs}, follow = false, window = "${draggedAddrClean}" })`)
+                                            const shouldSwap = (dropDir === "l" || dropDir === "u")
+                                            if (shouldSwap) {
+                                                Hyprland.dispatch(`hl.dsp.focus({ window = "${draggedAddrClean}" })`)
+                                                Hyprland.dispatch(`hl.dsp.window.swap({ target = "${targetAddrClean}" })`)
+                                            }
+                                        } else {
+                                            if (dropDir !== "") {
+                                                Hyprland.dispatch(`hl.dsp.focus({ window = "${targetAddrClean}" })`)
+                                                Hyprland.dispatch(`hl.dsp.focus({ window = "${draggedAddrClean}" })`)
+                                                Hyprland.dispatch(`hl.dsp.window.move({ direction = "${dropDir}" })`)
+                                            }
+                                        }
+                                    }
+                                    Hyprland.dispatch(`hl.dsp.cursor.move({ x = ${coords.x}, y = ${coords.y} })`)
+                                    HyprlandData.updateAll()
+                                    updateWindowPosition.restart()
+                                } else if (targetWs !== -1 && targetWs !== fromWs) {
+                                    // Dropped on empty workspace space
+                                    const targetWsTiledCount = root.getTiledCountInWorkspace(targetWs)
+                                    if (targetWsTiledCount <= 1) {
+                                        const draggedAddrClean = draggedAddr.startsWith("address:") ? draggedAddr : `address:${draggedAddr}`
+                                        Hyprland.dispatch(`hl.dsp.window.move({ workspace = ${targetWs}, follow = false, window = "${draggedAddrClean}" })`)
+                                        if (targetWsTiledCount === 1 && (dropDir === "l" || dropDir === "u")) {
+                                            const existingWin = root.getSingleTiledWindowInWorkspace(targetWs, draggedAddrClean)
+                                            if (existingWin) {
+                                                const existingAddr = existingWin.address.startsWith("address:") ? existingWin.address : `address:${existingWin.address}`
+                                                Hyprland.dispatch(`hl.dsp.focus({ window = "${draggedAddrClean}" })`)
+                                                Hyprland.dispatch(`hl.dsp.window.swap({ target = "${existingAddr}" })`)
+                                            }
+                                        }
+                                        Hyprland.dispatch(`hl.dsp.cursor.move({ x = ${coords.x}, y = ${coords.y} })`)
+                                        HyprlandData.updateAll()
+                                        updateWindowPosition.restart()
+                                    } else {
+                                        updateWindowPosition.restart()
+                                    }
+                                } else {
+                                    // Same workspace on empty space
+                                    if (!window.windowData?.floating) {
+                                        updateWindowPosition.restart()
+                                        return
+                                    }
+                                    const percentageX = (window.x - xOffset) / root.workspaceImplicitWidth
+                                    const percentageY = (window.y - yOffset) / root.workspaceImplicitHeight
+                                    Hyprland.dispatch(`hl.dsp.window.move({ x = "${percentageX * root.screen.width}", y = "${percentageY * root.screen.height}", window = "address:${draggedAddr}" })`)
+                                    Hyprland.dispatch(`hl.dsp.cursor.move({ x = ${coords.x}, y = ${coords.y} })`)
+                                    updateWindowPosition.restart()
+                                }
+                            }
+                        }
+
                         onClicked: (event) => {
-                            if (!windowData) return;
+                            if (!windowData || isResizing || wasDragged) return;
 
                             if (event.button === Qt.LeftButton) {
                                 GlobalStates.overviewOpen = false
@@ -294,8 +639,8 @@ Item {
 
                         StyledToolTip {
                             extraVisibleCondition: false
-                            alternativeVisibleCondition: dragArea.containsMouse && !window.Drag.active
-                            text: `${windowData?.title}\n[${windowData?.class}] ${windowData?.xwayland ? "[XWayland] " : ""}`
+                            alternativeVisibleCondition: dragArea.containsMouse && !window.Drag.active && !dragArea.isResizing
+                            text: `${windowData?.title}\n[${windowData?.class}] ${windowData?.xwayland ? "[XWayland] " : ""}`.trim()
                         }
                     }
                 }
