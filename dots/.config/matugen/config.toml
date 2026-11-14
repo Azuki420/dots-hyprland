@@ -32,3 +32,19 @@ output_path = '~/.local/state/quickshell/user/generated/color.txt'
 [templates.wallpaper]
 input_path = '~/.config/matugen/templates/wallpaper.txt'
 output_path = '~/.local/state/quickshell/user/generated/wallpaper/path.txt'
+
+[templates.hyprland-preview-share-picker]
+input_path = "~/.config/hyprland-preview-share-picker/template-colors.css"
+output_path = "~/.config/hyprland-preview-share-picker/generated-colors.css"
+
+[templates.firefox_websites]
+input_path = '~/.config/matugen/templates/firefox_websites.css'
+output_path = '~/.config/matugen/generated/firefox_websites.css'
+
+[templates.vice]
+input_path = '/home/azuki/.config/vice/matugen-template.json'
+output_path = '/home/azuki/.config/vice/matugen.json'
+
+[templates.vencord]
+input_path = '~/.config/matugen/templates/vencord.css'
+output_path = '~/.config/Vencord/themes/matugen.theme.css'
